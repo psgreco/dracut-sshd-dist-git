@@ -1,0 +1,464 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Georg Sauthoff <mail@gms.tf>
+Date: Sun, 4 Jun 2023 17:45:16 +0200
+Subject: [PATCH 1/9] add Rocky 8.8
+
+---
+ README.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/README.md b/README.md
+index ae560cfea522..5990102e3e4c 100644
+--- a/README.md
++++ b/README.md
+@@ -480,7 +480,7 @@ Related Fedora ticket: [Bug 524727 - Dracut + encrypted root + networking (2009)
+ - CentOS 7, 8
+ - CentOS Stream 9 (by a contributor)
+ - RHEL 8 beta 1
+-- Rocky Linux 9 (by a contributor)
++- Rocky Linux 8.8, 9 (by a contributor)
+ - Gentoo (by a contributor)
+ - SUSE (by a contributor)
+ - Arch (by a contributor)
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Georg Sauthoff <mail@gms.tf>
+Date: Mon, 12 Jun 2023 01:57:41 +0200
+Subject: [PATCH 2/9] Update related work and include Mandos/Tang
+
+---
+ README.md | 29 ++++++++++++++++-------------
+ 1 file changed, 16 insertions(+), 13 deletions(-)
+
+diff --git a/README.md b/README.md
+index 5990102e3e4c..969dc1fe2eb3 100644
+--- a/README.md
++++ b/README.md
+@@ -417,19 +417,13 @@ differences to dracut-sshd:
+   dangerous to use, e.g. when the password prompt times out the
+   password is echoed to the console
+ 
+-A [dracut-crypt-ssh pull request][cryptssh-uwe] (open since 2017,
+-still open as of 2021) for optionally using OpenSSH's sshd instead of Dropbear.
+-Main differences to dracut-sshd:
++In 2017, a [dracut-crypt-ssh pull request][cryptssh-uwe] added
++support for optionally using OpenSSH's sshd instead of Dropbear,
++without changing the other differences. It was closed without
++being merged in 2021.
+ 
+-- doesn't use systemd for starting/stopping the sshd daemon
+-- generates a new set of host keys, by default
+-- listens on a non-standard port for ssh, by default
+-- arguably more complex than dracut-sshd - certainly more lines
+-  of code and some options
+-- unlock command still present
+-- pull-request evolved via additional commits without cleanup rebases
+-
+-There is [mk-fg/dracut-crypt-sshd][mkfg] which was marked
++There are also some other dracut modules that use Dropbear:
++[mk-fg/dracut-crypt-sshd][mkfg] which was marked
+ deprecated in 2016 in favour of the above dracut-crypt-ssh. It
+ uses Dropbear and some console hacks instead of
+ `systemd-tty-ask-password-agent`.
+@@ -450,7 +444,14 @@ though. Also, they use Dropbear and Tinyssh as ssh daemon.
+ [LUKS][luks] unlocking and Dracut support. Looking at its documentation,
+ when it comes to automatic LUKS unlocking, the LUKS passphrase is
+ stored encrypted in the LUKS header. Clevis then decrypts it
+-using an external service/hardware (e.g. a [TPM] module).
++using an external service/hardware (e.g. a [Tang][tang] server
++or a [TPM] module).
++
++Similar to Clevis, [Mandos][mandos] also implements a framework
++for unattended LUKS unlocking. Unlike Clevis, it primarily
++targets Debian and doesn't support TPM. That means for unlocking
++the Mandos client fetches the asymmetrically encrypted LUKS
++password from a Mandos server.
+ 
+ With version 248 (i.e. available since early 2021 or so),
+ [systemd integrated some automatic LUKS2 volume unlocking
+@@ -529,3 +530,5 @@ Related Fedora ticket: [Bug 524727 - Dracut + encrypted root + networking (2009)
+ [rpm-ostree]: https://discussion.fedoraproject.org/t/using-dracut-sshd-to-unlock-a-luks-encrypted-system/23449/6
+ [pikvm]: https://github.com/pikvm/pikvm
+ [authboot]: https://0pointer.net/blog/authenticated-boot-and-disk-encryption-on-linux.html
++[tang]: https://github.com/latchset/tang
++[mandos]: https://www.recompile.se/mandos
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Warren Togami <wtogami@gmail.com>
+Date: Thu, 15 Jun 2023 16:47:56 -0500
+Subject: [PATCH 3/9] rpm owns module directories to ensure clean uninstall
+
+Signed-off-by: Warren Togami <wtogami@gmail.com>
+---
+ dracut-sshd.spec | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/dracut-sshd.spec b/dracut-sshd.spec
+index 37ad210cc159..983d7038bc70 100644
+--- a/dracut-sshd.spec
++++ b/dracut-sshd.spec
+@@ -31,6 +31,7 @@ mkdir -p %{buildroot}/usr/lib/dracut/modules.d
+ cp -r 46sshd %{buildroot}/usr/lib/dracut/modules.d/
+ 
+ %files
++%dir /usr/lib/dracut/modules.d/46sshd/
+ /usr/lib/dracut/modules.d/46sshd/module-setup.sh
+ /usr/lib/dracut/modules.d/46sshd/sshd.service
+ /usr/lib/dracut/modules.d/46sshd/motd
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Warren Togami <wtogami@gmail.com>
+Date: Wed, 14 Jun 2023 01:21:02 -0500
+Subject: [PATCH 4/9] Fixup /etc/shadow to allow ssh pubkey login with disabled
+ password
+
+SSH pubkey login while the password is disabled is common on normal
+systems. That normally shows up in /etc/shadow as '^root:!:'
+
+Both '!' and '*' are invalid hashes denoting the password is disabled but sshd
+with "UsePAM no" differently interprets where '!' disallows logins despite a
+valid ssh pubkey. If you installed and manually enabled dracut-sshd networking
+you surely did not intend for it to deny ssh pubkey authentication.
+
+99sshd-shadow-fixup runs after 99base had copied the /etc/shadow entry
+replacing the '!' character with '*' thereby allowing SSH pubkey login to
+work as intended.
+
+Fixes: https://github.com/gsauthof/dracut-sshd/issues/19
+Signed-off-by: Warren Togami <wtogami@gmail.com>
+---
+ 99sshd-shadow-fixup/module-setup.sh | 25 +++++++++++++++++++++++++
+ dracut-sshd.spec                    |  2 ++
+ 2 files changed, 27 insertions(+)
+ create mode 100755 99sshd-shadow-fixup/module-setup.sh
+
+diff --git a/99sshd-shadow-fixup/module-setup.sh b/99sshd-shadow-fixup/module-setup.sh
+new file mode 100755
+index 000000000000..288a71eec91c
+--- /dev/null
++++ b/99sshd-shadow-fixup/module-setup.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++
++# 2023, Warren Togami <wtogami@gmail.com>
++# SPDX-License-Identifier: GPL-3.0-or-later
++
++# called by dracut
++check() {
++    require_binaries sshd || return 1
++    # 0 enables by default, 255 only on request
++    return 0
++}
++
++# called by dracut
++depends() {
++    return 0
++}
++
++# called by dracut
++install() {
++    # /etc/shadow "root:!:" allows for ssh pubkey logins on a normal system.
++    # dracut-sshd "UsePAM no" is incompatible with a '!'. Fixup to '*' which allows ssh pubkey login to work as intended.
++    test -f "$initdir/etc/shadow" && grep '^root:!:' "$initdir/etc/shadow" -q && sed -i -e 's/^root:!:/root:*:/' "$initdir/etc/shadow"
++
++    return 0
++}
+diff --git a/dracut-sshd.spec b/dracut-sshd.spec
+index 983d7038bc70..49c6b5412e1c 100644
+--- a/dracut-sshd.spec
++++ b/dracut-sshd.spec
+@@ -29,6 +29,7 @@ root filesystem and remote access to the Dracut emergency shell
+ %install
+ mkdir -p %{buildroot}/usr/lib/dracut/modules.d
+ cp -r 46sshd %{buildroot}/usr/lib/dracut/modules.d/
++cp -r 99sshd-shadow-fixup %{buildroot}/usr/lib/dracut/modules.d/
+ 
+ %files
+ %dir /usr/lib/dracut/modules.d/46sshd/
+@@ -36,6 +37,7 @@ cp -r 46sshd %{buildroot}/usr/lib/dracut/modules.d/
+ /usr/lib/dracut/modules.d/46sshd/sshd.service
+ /usr/lib/dracut/modules.d/46sshd/motd
+ /usr/lib/dracut/modules.d/46sshd/profile
++/usr/lib/dracut/modules.d/99sshd-shadow-fixup/module-setup.sh
+ %config(noreplace) /usr/lib/dracut/modules.d/46sshd/sshd_config
+ %doc README.md
+ %doc example/20-wired.network
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Warren Togami <wtogami@gmail.com>
+Date: Wed, 14 Jun 2023 21:43:51 -0500
+Subject: [PATCH 5/9] dracut-sshd-networkmanager subpackage
+
+  99sshd-auto-networkmanager adjusts nm-initrd.service to run for dracut-sshd.
+- If config is lacking auto DHCP ethernet in the same manner as rootfs NetworkManager.
+- Clean network teardown prior to switchroot avoids conflicts and gives OS full control.
+- Settings could be overriden by copying ifcfg or nmconnection settings into the initrd.
+
+Fixes: Issues #63 #68
+Signed-off-by: Warren Togami <wtogami@gmail.com>
+---
+ 99sshd-networkmanager/module-setup.sh | 26 ++++++++++++++++++++++++++
+ dracut-sshd.spec                      | 19 +++++++++++++++++++
+ 2 files changed, 45 insertions(+)
+ create mode 100755 99sshd-networkmanager/module-setup.sh
+
+diff --git a/99sshd-networkmanager/module-setup.sh b/99sshd-networkmanager/module-setup.sh
+new file mode 100755
+index 000000000000..77be70892639
+--- /dev/null
++++ b/99sshd-networkmanager/module-setup.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++
++# 2023, Warren Togami <wtogami@gmail.com>
++# SPDX-License-Identifier: GPL-3.0-or-later
++
++# called by dracut
++check() {
++    require_binaries sshd || return 1
++    # 0 enables by default, 255 only on request
++    return 0
++}
++
++# called by dracut
++depends() {
++    return 0
++}
++
++# called by dracut
++install() {
++    # allow NetworkManager to auto configure "Wired connection #" DHCP connections for Ethernet interfaces
++    rm -f  "$initdir/usr/lib/NetworkManager/conf.d/initrd-no-auto-default.conf"
++
++    # tell Networkmanager to run
++    echo "rd.neednet" >> "${initdir}/etc/cmdline.d/50neednet.conf"
++    return 0
++}
+diff --git a/dracut-sshd.spec b/dracut-sshd.spec
+index 49c6b5412e1c..d70a08156537 100644
+--- a/dracut-sshd.spec
++++ b/dracut-sshd.spec
+@@ -20,6 +20,21 @@ initramfs. It allows for remote unlocking of a fully encrypted
+ root filesystem and remote access to the Dracut emergency shell
+ (i.e. early userspace).
+ 
++%package networkmanager
++Summary:    Enables NetworkManager for sshd during initramfs
++Requires:   dracut-sshd
++Requires:   NetworkManager
++
++%description networkmanager
++This module enables dracut network-manager settings for dracut-sshd.
++
++- If no configuration is provided it uses DHCP to bring up ethernet
++  in the same manner as rootfs NetworkManager.
++- Cleanly tears down networking prior to switchroot to avoid conflicts
++  thereby allowing the OS full control of networking config.
++- Network settings could be overriden by copying ifcfg or nmconnection
++  settings into the initrd. e.g. static IP's
++
+ %prep
+ {{{ git_dir_setup_macro }}}
+ 
+@@ -30,6 +45,7 @@ root filesystem and remote access to the Dracut emergency shell
+ mkdir -p %{buildroot}/usr/lib/dracut/modules.d
+ cp -r 46sshd %{buildroot}/usr/lib/dracut/modules.d/
+ cp -r 99sshd-shadow-fixup %{buildroot}/usr/lib/dracut/modules.d/
++cp -r 99sshd-networkmanager %{buildroot}/usr/lib/dracut/modules.d/
+ 
+ %files
+ %dir /usr/lib/dracut/modules.d/46sshd/
+@@ -43,6 +59,9 @@ cp -r 99sshd-shadow-fixup %{buildroot}/usr/lib/dracut/modules.d/
+ %doc example/20-wired.network
+ %doc example/90-networkd.conf
+ 
++%files networkmanager
++/usr/lib/dracut/modules.d/99sshd-networkmanager/module-setup.sh
++
+ %changelog
+ * Sat May 27 2023 Georg Sauthoff <mail@gms.tf> - 0.6.5-1
+ - eliminate tmpfiles and fix Debian/Ubuntu support
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Warren Togami <wtogami@gmail.com>
+Date: Wed, 14 Jun 2023 01:21:02 -0500
+Subject: [PATCH 6/9] Fixup /etc/shadow to allow ssh pubkey login with disabled
+ password
+
+SSH pubkey login while the password is disabled is common on normal
+systems. That normally shows up in /etc/shadow as '^root:!:'
+
+Both '!' and '*' are invalid hashes denoting the password is disabled but sshd
+with "UsePAM no" differently interprets where '!' disallows logins despite a
+valid ssh pubkey. If you installed and manually enabled dracut-sshd networking
+you surely did not intend for it to deny ssh pubkey authentication.
+
+99sshd-shadow-fixup runs after 99base had copied the /etc/shadow entry
+replacing the '!' character with '*' thereby allowing SSH pubkey login to
+work as intended.
+
+Fixes: https://github.com/gsauthof/dracut-sshd/issues/19
+Signed-off-by: Warren Togami <wtogami@gmail.com>
+---
+ dracut-sshd.spec | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/dracut-sshd.spec b/dracut-sshd.spec
+index d70a08156537..f375c8b3f314 100644
+--- a/dracut-sshd.spec
++++ b/dracut-sshd.spec
+@@ -4,7 +4,7 @@ Name:       {{{ git_dir_name }}}
+ # the 'lead' parameter, anyways
+ # cf. https://pagure.io/rpkg-util/issue/21#comment-601077
+ #Version:    {{{ git_dir_version }}}
+-Version:    0.6.5
++Version:    0.6.6
+ Release:    1%{?dist}
+ Summary:    Provide SSH access to initramfs early user space
+ URL:        https://github.com/gsauthof/dracut-sshd
+@@ -63,6 +63,9 @@ cp -r 99sshd-networkmanager %{buildroot}/usr/lib/dracut/modules.d/
+ /usr/lib/dracut/modules.d/99sshd-networkmanager/module-setup.sh
+ 
+ %changelog
++* Wed Jun 14 2023 Warren Togami <wtogami@gmail.com> - 0.6.6-1
++- 99sshd-shadow-fixup enables ssh pubkey login with disabled password as intended
++
+ * Sat May 27 2023 Georg Sauthoff <mail@gms.tf> - 0.6.5-1
+ - eliminate tmpfiles and fix Debian/Ubuntu support
+ 
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Warren Togami <wtogami@gmail.com>
+Date: Wed, 14 Jun 2023 21:43:51 -0500
+Subject: [PATCH 7/9] dracut-sshd-networkmanager subpackage
+
+  99sshd-auto-networkmanager adjusts nm-initrd.service to run for dracut-sshd.
+- If config is lacking auto DHCP ethernet in the same manner as rootfs NetworkManager.
+- Clean network teardown prior to switchroot avoids conflicts and gives OS full control.
+- Settings could be overriden by copying ifcfg or nmconnection settings into the initrd.
+
+Fixes: Issues #63 #68
+Signed-off-by: Warren Togami <wtogami@gmail.com>
+---
+ dracut-sshd.spec | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/dracut-sshd.spec b/dracut-sshd.spec
+index f375c8b3f314..908666dda2bc 100644
+--- a/dracut-sshd.spec
++++ b/dracut-sshd.spec
+@@ -4,7 +4,7 @@ Name:       {{{ git_dir_name }}}
+ # the 'lead' parameter, anyways
+ # cf. https://pagure.io/rpkg-util/issue/21#comment-601077
+ #Version:    {{{ git_dir_version }}}
+-Version:    0.6.6
++Version:    0.6.7
+ Release:    1%{?dist}
+ Summary:    Provide SSH access to initramfs early user space
+ URL:        https://github.com/gsauthof/dracut-sshd
+@@ -63,6 +63,13 @@ cp -r 99sshd-networkmanager %{buildroot}/usr/lib/dracut/modules.d/
+ /usr/lib/dracut/modules.d/99sshd-networkmanager/module-setup.sh
+ 
+ %changelog
++* Wed Jun 14 2023 Warren Togami <wtogami@gmail.com> - 0.6.7-1
++- dracut-sshd-networkmanager subpackage
++  99sshd-networkmanager adjusts nm-initrd.service to run for dracut-sshd.
++- If config is lacking, auto DHCP ethernet in the same manner as rootfs NetworkManager.
++- Clean network teardown prior to switchroot avoids conflicts and gives OS full control.
++- Settings could be overriden by copying ifcfg or nmconnection settings into the initrd.
++
+ * Wed Jun 14 2023 Warren Togami <wtogami@gmail.com> - 0.6.6-1
+ - 99sshd-shadow-fixup enables ssh pubkey login with disabled password as intended
+ 
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Warren Togami <wtogami@gmail.com>
+Date: Thu, 15 Jun 2023 16:44:21 -0500
+Subject: [PATCH 8/9] silence 99sshd-shadow-fixup because missing /etc/shadow
+ is valid
+
+Signed-off-by: Warren Togami <wtogami@gmail.com>
+---
+ dracut-sshd.spec | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/dracut-sshd.spec b/dracut-sshd.spec
+index 908666dda2bc..9ab65637a75c 100644
+--- a/dracut-sshd.spec
++++ b/dracut-sshd.spec
+@@ -63,6 +63,9 @@ cp -r 99sshd-networkmanager %{buildroot}/usr/lib/dracut/modules.d/
+ /usr/lib/dracut/modules.d/99sshd-networkmanager/module-setup.sh
+ 
+ %changelog
++* Thu Jun 15 2023 Warren Togami <wtogami@gmail.com>
++- silence 99sshd-shadow-fixup because missing /etc/shadow is valid
++
+ * Wed Jun 14 2023 Warren Togami <wtogami@gmail.com> - 0.6.7-1
+ - dracut-sshd-networkmanager subpackage
+   99sshd-networkmanager adjusts nm-initrd.service to run for dracut-sshd.
+-- 
+2.41.0
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Warren Togami <wtogami@gmail.com>
+Date: Thu, 15 Jun 2023 16:47:56 -0500
+Subject: [PATCH 9/9] rpm owns module directories to ensure clean uninstall
+
+Signed-off-by: Warren Togami <wtogami@gmail.com>
+---
+ dracut-sshd.spec | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/dracut-sshd.spec b/dracut-sshd.spec
+index 9ab65637a75c..af997f66e18e 100644
+--- a/dracut-sshd.spec
++++ b/dracut-sshd.spec
+@@ -4,7 +4,7 @@ Name:       {{{ git_dir_name }}}
+ # the 'lead' parameter, anyways
+ # cf. https://pagure.io/rpkg-util/issue/21#comment-601077
+ #Version:    {{{ git_dir_version }}}
+-Version:    0.6.7
++Version:    0.6.8
+ Release:    1%{?dist}
+ Summary:    Provide SSH access to initramfs early user space
+ URL:        https://github.com/gsauthof/dracut-sshd
+@@ -60,11 +60,13 @@ cp -r 99sshd-networkmanager %{buildroot}/usr/lib/dracut/modules.d/
+ %doc example/90-networkd.conf
+ 
+ %files networkmanager
++%dir /usr/lib/dracut/modules.d/99sshd-networkmanager/
+ /usr/lib/dracut/modules.d/99sshd-networkmanager/module-setup.sh
+ 
+ %changelog
+-* Thu Jun 15 2023 Warren Togami <wtogami@gmail.com>
++* Thu Jun 15 2023 Warren Togami <wtogami@gmail.com> - 0.6.8-1
+ - silence 99sshd-shadow-fixup because missing /etc/shadow is valid
++- rpm owns module directories to ensure clean uninstall
+ 
+ * Wed Jun 14 2023 Warren Togami <wtogami@gmail.com> - 0.6.7-1
+ - dracut-sshd-networkmanager subpackage
+-- 
+2.41.0
+
